@@ -396,6 +396,10 @@ def train(args):
         input_ids = batch["input_ids"]  # (B, L)
 
         with accelerator.accumulate(model):
+            # Fix for CUDAGraphs overwrite issue when using torch.compile
+            if hasattr(torch, "compiler") and hasattr(torch.compiler, "cudagraph_mark_step_begin"):
+                torch.compiler.cudagraph_mark_step_begin()
+
             # Forward process: sample x_t from mixture path
             x_t, t = forward_process(input_ids, mask_id=model_config.mask_id, eps=jump_config.eps)
 
@@ -403,8 +407,10 @@ def train(args):
             logits = model(x_t, t)
 
             # Compute jump ELBO loss
+            # Clone logits to prevent CUDA graph overwrite issue if not fixed by mark_step_begin
             loss = compute_jump_loss(
-                logits, input_ids, x_t, t,
+                logits.clone() if hasattr(torch, "compiler") else logits, 
+                input_ids, x_t, t,
                 mask_id=model_config.mask_id,
                 eps=jump_config.eps,
             )
