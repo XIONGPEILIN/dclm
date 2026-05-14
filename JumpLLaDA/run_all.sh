@@ -68,13 +68,19 @@ if [ ! -L "./outputs" ]; then
     fi
 fi
 
-# 自动查找数据路径
+# 清理可能存在的随机测试数据，防止干扰全量训练
+if [ -d "/export/ssd2/xiong-p/dclm/data/tokenized/test" ]; then
+    echo "清理随机测试数据: /export/ssd2/xiong-p/dclm/data/tokenized/test"
+    rm -rf /export/ssd2/xiong-p/dclm/data/tokenized/test
+fi
+
+# 自动查找数据路径 (排除 test)
 DATA_PATH=""
 if [ -d "./data/tokenized" ]; then
-    DATA_PATH=$(find ./data/tokenized -name "*.bin" -print -quit 2>/dev/null | xargs -r dirname)
+    DATA_PATH=$(find ./data/tokenized -maxdepth 2 -type f -name "*.bin" ! -path "*/test/*" -print -quit 2>/dev/null | xargs -r dirname)
 fi
 if [ -z "$DATA_PATH" ] && [ -d "/export/ssd2/xiong-p/dclm/data/tokenized" ]; then
-    DATA_PATH=$(find /export/ssd2/xiong-p/dclm/data/tokenized -name "*.bin" -print -quit 2>/dev/null | xargs -r dirname)
+    DATA_PATH=$(find /export/ssd2/xiong-p/dclm/data/tokenized -maxdepth 2 -type f -name "*.bin" ! -path "*/test/*" -print -quit 2>/dev/null | xargs -r dirname)
 fi
 
 if [ -z "$DATA_PATH" ]; then
