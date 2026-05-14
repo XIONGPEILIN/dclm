@@ -10,6 +10,10 @@
 # ============================================================
 
 set -e
+export CUDA_DEVICE_ORDER=PCI_BUS_ID                                                                                                                                                 
+export NCCL_P2P_DISABLE=0                                                                                                                                                           
+export NCCL_SHM_DISABLE=1                                                                                                                                                           
+export NCCL_P2P_LEVEL=5 
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -26,19 +30,10 @@ echo "[1/3] 安装依赖..."
 uv pip install  torch transformers accelerate datasets numpy tqdm wandb 2>/dev/null || true
 
 # ============================================================
-# 第2步: 下载并准备数据 (C4, 30B tokens)
+# 第2步已移除：使用边下边练的 Streaming 模式
 # ============================================================
 echo ""
-echo "[2/3] 准备数据 (C4, 30B tokens)..."
-echo "  数据存储: /export/ssd2/xiong-p/dclm/data/"
-echo "  软链接:   ./data/"
-
-python prepare_data.py \
-    --dataset c4 \
-    --num_tokens 30B \
-    --tokenizer "EleutherAI/gpt-neox-20b" \
-    --seq_len 2048 \
-    --num_proc 8
+echo "[2/3] 数据: 直接从 HuggingFace 边下载边分词 (Streaming) ..."
 
 # ============================================================
 # 第3步: 训练 (8× A40-48GB)
@@ -74,20 +69,6 @@ if [ -d "/export/ssd2/xiong-p/dclm/data/tokenized/test" ]; then
     rm -rf /export/ssd2/xiong-p/dclm/data/tokenized/test
 fi
 
-# 自动查找数据路径 (排除 test)
-DATA_PATH=""
-if [ -d "./data/tokenized" ]; then
-    DATA_PATH=$(find ./data/tokenized -maxdepth 2 -type f -name "*.bin" ! -path "*/test/*" -print -quit 2>/dev/null | xargs -r dirname)
-fi
-if [ -z "$DATA_PATH" ] && [ -d "/export/ssd2/xiong-p/dclm/data/tokenized" ]; then
-    DATA_PATH=$(find /export/ssd2/xiong-p/dclm/data/tokenized -maxdepth 2 -type f -name "*.bin" ! -path "*/test/*" -print -quit 2>/dev/null | xargs -r dirname)
-fi
-
-if [ -z "$DATA_PATH" ]; then
-    echo "错误: 未找到数据，请检查第2步是否成功"
-    exit 1
-fi
-
 echo "  GPU 数量:       $NUM_GPUS"
 echo "  每卡 BS:        $PER_DEVICE_BS"
 echo "  梯度累积:       $GRAD_ACCUM"
@@ -95,11 +76,12 @@ echo "  有效 BS:        $((NUM_GPUS * PER_DEVICE_BS * GRAD_ACCUM))"
 echo "  学习率:         $LR"
 echo "  最大步数:       $MAX_STEPS"
 echo "  序列长度:       $SEQ_LEN"
-echo "  数据路径:       $DATA_PATH"
 echo "  输出目录:       $OUTPUT_DIR"
 echo "============================================================"
 
-TRAIN_ARGS="--dataset_path $DATA_PATH \
+TRAIN_ARGS="--dataset_name allenai/c4 \
+    --dataset_subset en \
+    --streaming \
     --max_steps $MAX_STEPS \
     --per_device_batch_size $PER_DEVICE_BS \
     --gradient_accumulation_steps $GRAD_ACCUM \

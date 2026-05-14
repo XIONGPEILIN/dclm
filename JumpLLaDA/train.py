@@ -25,7 +25,7 @@ from dataclasses import dataclass, asdict
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 from accelerate import Accelerator
 from accelerate.utils import set_seed
@@ -141,6 +141,69 @@ class HFTokenizedDataset(Dataset):
         return {"input_ids": tokens}
 
 
+class StreamingTextDataset(IterableDataset):
+    """Streams text from HF dataset, tokenizes on-the-fly, yields seq_len chunks."""
+    def __init__(self, dataset_name: str, subset: str = None, split: str = "train", 
+                 tokenizer_name: str = "EleutherAI/gpt-neox-20b", seq_len: int = 2048,
+                 text_column: str = "text", seed: int = 42):
+        super().__init__()
+        from datasets import load_dataset
+        from transformers import AutoTokenizer
+        self.dataset_name = dataset_name
+        self.subset = subset
+        self.split = split
+        self.tokenizer_name = tokenizer_name
+        self.seq_len = seq_len
+        self.text_column = text_column
+        self.seed = seed
+
+    def __iter__(self):
+        from datasets import load_dataset
+        from transformers import AutoTokenizer
+        import torch.distributed as dist
+
+        # Initialize tokenizer inside worker to avoid multiprocessing issues
+        tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
+        
+        # Determine worker info
+        worker_info = torch.utils.data.get_worker_info()
+        num_workers = worker_info.num_workers if worker_info is not None else 1
+        worker_id = worker_info.id if worker_info is not None else 0
+
+        # Determine DDP info
+        world_size = dist.get_world_size() if dist.is_initialized() else 1
+        rank = dist.get_rank() if dist.is_initialized() else 0
+
+        # Total logical partitions = world_size * num_workers
+        total_partitions = world_size * num_workers
+        partition_id = rank * num_workers + worker_id
+
+        # Load streaming dataset
+        ds_kwargs = {"path": self.dataset_name, "split": self.split, "streaming": True}
+        if self.subset:
+            ds_kwargs["name"] = self.subset
+        
+        dataset = load_dataset(**ds_kwargs)
+        
+        # Shuffle with seed and shard for this specific worker
+        dataset = dataset.shuffle(seed=self.seed, buffer_size=10_000)
+        dataset = dataset.shard(num_shards=total_partitions, index=partition_id)
+
+        buffer = []
+        for example in dataset:
+            text = example.get(self.text_column, "")
+            if not text:
+                continue
+            
+            tokens = tokenizer.encode(text)
+            buffer.extend(tokens)
+
+            while len(buffer) >= self.seq_len:
+                chunk = buffer[:self.seq_len]
+                buffer = buffer[self.seq_len:]
+                yield {"input_ids": torch.tensor(chunk, dtype=torch.long)}
+
+
 # ============================================================================
 # Learning Rate Schedule
 # ============================================================================
@@ -226,7 +289,16 @@ def train(args):
         print(f"Mask ID: {model_config.mask_id}, Vocab: {model_config.vocab_size}")
 
     # Load dataset
-    if train_config.dataset_path:
+    if getattr(args, "streaming", False):
+        if accelerator.is_main_process:
+            print(f"Using Streaming On-the-Fly Tokenization for {train_config.dataset_name}")
+        dataset = StreamingTextDataset(
+            dataset_name=train_config.dataset_name,
+            subset=getattr(args, "dataset_subset", None),
+            seq_len=train_config.seq_len,
+            seed=train_config.seed
+        )
+    elif train_config.dataset_path:
         dataset = TokenizedDataset(train_config.dataset_path, seq_len=train_config.seq_len)
     elif train_config.dataset_name:
         from datasets import load_dataset
@@ -235,13 +307,15 @@ def train(args):
     else:
         raise ValueError("Must specify --dataset_path or --dataset_name")
 
+    # DataLoader setup: drop_last=True doesn't work with IterableDataset
+    drop_last = not isinstance(dataset, torch.utils.data.IterableDataset)
     dataloader = DataLoader(
         dataset,
         batch_size=train_config.per_device_batch_size,
-        shuffle=True,
+        shuffle=drop_last, # Can't shuffle an IterableDataset this way
         num_workers=train_config.num_workers,
         pin_memory=True,
-        drop_last=True,
+        drop_last=drop_last,
     )
 
     # Optimizer: Muon for 2D weights + AdamW for 1D params (biases, norms, embeddings)
@@ -299,7 +373,10 @@ def train(args):
     if accelerator.is_main_process:
         print(f"Training config: lr={train_config.lr}, bs={train_config.per_device_batch_size}, "
               f"grad_accum={train_config.gradient_accumulation_steps}, max_steps={train_config.max_steps}")
-        print(f"Dataset: {len(dataset):,} samples")
+        if hasattr(dataset, "__len__"):
+            print(f"Dataset: {len(dataset):,} samples")
+        else:
+            print("Dataset: Streaming (infinite)")
         print("=" * 60)
 
     # Training loop
@@ -469,6 +546,10 @@ def parse_args():
                         help="Path to tokenized data directory (.bin files)")
     parser.add_argument("--dataset_name", type=str, default=None,
                         help="HuggingFace dataset name")
+    parser.add_argument("--dataset_subset", type=str, default=None,
+                        help="HuggingFace dataset subset")
+    parser.add_argument("--streaming", action="store_true",
+                        help="Stream and tokenize on-the-fly directly from HF")
 
     # Training
     parser.add_argument("--lr", type=float, default=None)
