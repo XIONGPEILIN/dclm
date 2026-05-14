@@ -32,7 +32,7 @@ from accelerate.utils import set_seed
 
 from config import ModelConfig, JumpConfig, TrainingConfig
 from model import create_model
-from jump_process import forward_process, compute_jump_loss
+from jump_process import forward_process, compute_jump_loss, euler_sample
 
 
 # ============================================================================
@@ -196,6 +196,8 @@ def train(args):
         model_config.gradient_checkpointing = True
     if args.seed is not None:
         train_config.seed = args.seed
+    if args.save_interval is not None:
+        train_config.save_interval = args.save_interval
 
     # Initialize accelerator
     accelerator = Accelerator(
@@ -380,7 +382,7 @@ def train(args):
                 running_loss = 0.0
                 start_time = time.time()
 
-            # Save checkpoint
+            # Save checkpoint + run inference
             if global_step % train_config.save_interval == 0:
                 save_dir = os.path.join(train_config.output_dir, f"checkpoint-{global_step}")
                 accelerator.save_state(save_dir)
@@ -396,6 +398,48 @@ def train(args):
                         "global_step": global_step,
                     }, os.path.join(save_dir, "model.pt"))
                     print(f"Saved checkpoint at step {global_step}")
+
+                    # Run inference and log to wandb
+                    try:
+                        unwrapped.eval()
+                        device = next(unwrapped.parameters()).device
+                        generated = euler_sample(
+                            model=unwrapped,
+                            seq_len=128,
+                            steps=64,
+                            mask_id=model_config.mask_id,
+                            vocab_size=model_config.vocab_size,
+                            device=device,
+                            batch_size=4,
+                            temperature=0.8,
+                        )
+                        # Decode generated tokens
+                        from transformers import AutoTokenizer
+                        tokenizer = AutoTokenizer.from_pretrained(train_config.tokenizer_name)
+                        samples = []
+                        for i in range(generated.shape[0]):
+                            text = tokenizer.decode(generated[i], skip_special_tokens=True)
+                            mask_count = (generated[i] == model_config.mask_id).sum().item()
+                            samples.append({
+                                "sample_id": i,
+                                "text": text[:500],
+                                "remaining_masks": mask_count,
+                                "step": global_step,
+                            })
+                            print(f"  Sample {i}: [{mask_count} masks] {text[:200]}")
+
+                        if train_config.wandb_project:
+                            import wandb
+                            table = wandb.Table(
+                                columns=["step", "sample_id", "text", "remaining_masks"],
+                                data=[[s["step"], s["sample_id"], s["text"], s["remaining_masks"]] for s in samples]
+                            )
+                            accelerator.log({"generations": table}, step=global_step)
+
+                        unwrapped.train()
+                    except Exception as e:
+                        print(f"  Inference failed: {e}")
+                        unwrapped.train()
 
     # Final save
     if accelerator.is_main_process:
@@ -434,6 +478,7 @@ def parse_args():
     parser.add_argument("--seq_len", type=int, default=None)
     parser.add_argument("--gradient_checkpointing", action="store_true")
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--save_interval", type=int, default=None)
 
     # Output
     parser.add_argument("--output_dir", type=str, default=None)

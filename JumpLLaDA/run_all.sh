@@ -57,6 +57,17 @@ MAX_STEPS=100000
 SEQ_LEN=2048
 OUTPUT_DIR="/export/ssd2/xiong-p/dclm/outputs/jump_llada"
 
+# 创建输出目录软链接
+if [ ! -L "./outputs" ]; then
+    if [ -d "./outputs" ]; then
+        echo "警告: ./outputs 已存在且不是软链接，跳过软链接创建"
+    else
+        mkdir -p /export/ssd2/xiong-p/dclm/outputs
+        ln -s /export/ssd2/xiong-p/dclm/outputs ./outputs
+        echo "已创建软链接: ./outputs -> /export/ssd2/xiong-p/dclm/outputs"
+    fi
+fi
+
 # 自动查找数据路径
 DATA_PATH=""
 if [ -d "./data/tokenized" ]; then
@@ -88,7 +99,8 @@ TRAIN_ARGS="--dataset_path $DATA_PATH \
     --gradient_accumulation_steps $GRAD_ACCUM \
     --lr $LR \
     --seq_len $SEQ_LEN \
-    --output_dir $OUTPUT_DIR"
+    --output_dir $OUTPUT_DIR \
+    --wandb_project jump_llada"
 
 if [ "$NUM_GPUS" -gt 1 ]; then
     echo "使用 accelerate 多卡训练 ($NUM_GPUS GPUs)..."
