@@ -351,9 +351,9 @@ class JumpLLaDA(nn.Module):
 
         # Output logits
         if self.config.weight_tying:
-            logits = F.linear(x, self.token_embedding.weight)
+            logits = F.linear(x, self.token_embedding.weight).clone()
         else:
-            logits = self.output_head(x)
+            logits = self.output_head(x).clone()
 
         return logits
 
