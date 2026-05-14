@@ -6,8 +6,8 @@ Download and tokenize a dataset for JumpLLaDA training.
 Uses the same GPT-NeoX tokenizer as DCLM (EleutherAI/gpt-neox-20b, vocab=50432).
 Tokenized data is saved as memory-mapped .bin files (uint16).
 
-If dataset size > 2TB, data is stored at /export/space0/data/HF.
-Otherwise, stored locally under ./data/tokenized.
+Data is downloaded to /export/ssd2/xiong-p/dclm/data and symlinked to ./data.
+If dataset size > 2TB, data is stored at /export/space0/data/HF instead.
 
 Usage:
     python prepare_data.py --dataset fineweb-edu --num_tokens 30B
@@ -26,7 +26,8 @@ from tqdm import tqdm
 # Size threshold: 2TB
 SIZE_THRESHOLD_BYTES = 2 * 1024 ** 4  # 2 TiB
 LARGE_DATA_DIR = "/export/space0/data/HF"
-LOCAL_DATA_DIR = "./data"
+DEFAULT_DATA_DIR = "/export/ssd2/xiong-p/dclm/data"
+LOCAL_LINK_DIR = "./data"
 
 
 def parse_token_count(s: str) -> int:
@@ -52,9 +53,31 @@ def get_data_dir(estimated_size: int) -> str:
         data_dir = os.path.join(LARGE_DATA_DIR, "jump_llada_data")
     else:
         print(f"Estimated data size: {estimated_size / 1e9:.2f} GB (< 2 TB)")
-        print(f"Using local directory: {LOCAL_DATA_DIR}")
-        data_dir = LOCAL_DATA_DIR
+        print(f"Using SSD storage: {DEFAULT_DATA_DIR}")
+        data_dir = DEFAULT_DATA_DIR
     return data_dir
+
+
+def create_symlink(real_dir: str, link_dir: str):
+    """Create a symlink from link_dir -> real_dir if not already linked."""
+    link_path = Path(link_dir)
+    real_path = Path(real_dir)
+
+    if link_path.is_symlink():
+        current_target = link_path.resolve()
+        if current_target == real_path.resolve():
+            print(f"Symlink already exists: {link_dir} -> {real_dir}")
+            return
+        else:
+            print(f"Updating symlink: {link_dir} -> {real_dir} (was {current_target})")
+            link_path.unlink()
+    elif link_path.exists():
+        print(f"Warning: {link_dir} exists and is not a symlink. Skipping symlink creation.")
+        return
+
+    link_path.parent.mkdir(parents=True, exist_ok=True)
+    link_path.symlink_to(real_path)
+    print(f"Created symlink: {link_dir} -> {real_dir}")
 
 
 def tokenize_and_save(
@@ -270,6 +293,9 @@ def main():
         base_dir = get_data_dir(estimated_size)
         safe_name = dataset_name.replace("/", "_").replace("-", "_")
         output_dir = os.path.join(base_dir, "tokenized", safe_name)
+
+        # Create symlink: ./data -> real data dir
+        create_symlink(base_dir, LOCAL_LINK_DIR)
 
     print(f"Output directory: {output_dir}")
 
