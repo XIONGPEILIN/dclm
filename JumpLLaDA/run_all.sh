@@ -55,7 +55,7 @@ GRAD_ACCUM=8                  # 梯度累积步数
 LR=3e-4
 MAX_STEPS=100000
 SEQ_LEN=2048
-OUTPUT_DIR="./outputs/jump_llada"
+OUTPUT_DIR="/export/ssd2/xiong-p/dclm/outputs/jump_llada"
 
 # 自动查找数据路径
 DATA_PATH=""
@@ -88,8 +88,7 @@ TRAIN_ARGS="--dataset_path $DATA_PATH \
     --gradient_accumulation_steps $GRAD_ACCUM \
     --lr $LR \
     --seq_len $SEQ_LEN \
-    --output_dir $OUTPUT_DIR \
-    --gradient_checkpointing"
+    --output_dir $OUTPUT_DIR"
 
 if [ "$NUM_GPUS" -gt 1 ]; then
     echo "使用 accelerate 多卡训练 ($NUM_GPUS GPUs)..."
