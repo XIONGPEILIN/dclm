@@ -31,7 +31,7 @@ echo "============================================================"
 # Install dependencies if needed
 echo ""
 echo "[1/2] Checking dependencies..."
-pip install -q transformers datasets tqdm numpy 2>/dev/null || true
+uv pip install transformers datasets tqdm numpy 2>/dev/null || true
 
 # Run data preparation
 echo ""

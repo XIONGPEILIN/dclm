@@ -23,7 +23,7 @@ echo "============================================================"
 # ============================================================
 echo ""
 echo "[1/3] 安装依赖..."
-pip install -q torch transformers accelerate datasets numpy tqdm wandb 2>/dev/null || true
+uv pip install  torch transformers accelerate datasets numpy tqdm wandb 2>/dev/null || true
 
 # ============================================================
 # 第2步: 下载并准备数据 (C4, 30B tokens)

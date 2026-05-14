@@ -38,8 +38,10 @@ class JumpConfig:
 @dataclass
 class TrainingConfig:
     """Training hyperparameters (aligned with DCLM 1B config)."""
-    # Optimizer
-    lr: float = 3e-4
+    # Optimizer: Muon (for 2D weights) + AdamW (for 1D params)
+    muon_lr: float = 0.02          # Muon learning rate for 2D weight matrices
+    muon_momentum: float = 0.95    # Muon Nesterov momentum
+    lr: float = 3e-4               # AdamW learning rate for 1D params (biases, norms, embeddings)
     weight_decay: float = 0.033
     adam_beta1: float = 0.9
     adam_beta2: float = 0.95

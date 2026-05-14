@@ -1,4 +1,6 @@
-torch>=2.1.0
+# JumpLLaDA dependencies
+# Install with: uv pip install -r requirements.txt
+torch>=2.9.0       # Required for torch.optim.Muon
 transformers>=4.38.0
 accelerate>=0.27.0
 datasets>=2.18.0
