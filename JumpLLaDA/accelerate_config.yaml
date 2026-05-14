@@ -2,12 +2,7 @@ compute_environment: LOCAL_MACHINE
 debug: false
 distributed_type: MULTI_GPU
 downcast_bf16: 'no'
-dynamo_config:
-  dynamo_backend: INDUCTOR
-  dynamo_mode: max-autotune
-  dynamo_use_dynamic: false
-  dynamo_use_fullgraph: false
-  dynamo_use_regional_compilation: false
+dynamo_config: {}
 enable_cpu_affinity: true
 gpu_ids: all
 machine_rank: 0
