@@ -40,7 +40,7 @@ class TrainingConfig:
     """Training hyperparameters (aligned with DCLM 1B config)."""
     # Optimizer: AdamW
     lr: float = 3e-4               # AdamW learning rate
-    weight_decay: float = 0.033
+    weight_decay: float = 0.1
     adam_beta1: float = 0.9
     adam_beta2: float = 0.95
     adam_eps: float = 1e-8
