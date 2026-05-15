@@ -318,31 +318,22 @@ def train(args):
         drop_last=drop_last,
     )
 
-    # Optimizer: Muon for 2D weights + AdamW for 1D params (biases, norms, embeddings)
-    muon_params = [p for p in model.parameters() if p.requires_grad and p.ndim == 2]
-    adamw_params = [p for p in model.parameters() if p.requires_grad and p.ndim != 2]
-
-    if accelerator.is_main_process:
-        muon_count = sum(p.numel() for p in muon_params)
-        adamw_count = sum(p.numel() for p in adamw_params)
-        print(f"Optimizer: Muon ({muon_count:,} params) + AdamW ({adamw_count:,} params)")
-
-    optimizer_muon = torch.optim.Muon(
-        muon_params,
-        lr=train_config.muon_lr,
-        momentum=train_config.muon_momentum,
-    )
-    optimizer_adamw = torch.optim.AdamW(
-        adamw_params,
+    # Optimizer: AdamW for all params
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
         lr=train_config.lr,
         betas=(train_config.adam_beta1, train_config.adam_beta2),
         eps=train_config.adam_eps,
         weight_decay=train_config.weight_decay,
     )
 
+    if accelerator.is_main_process:
+        param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"Optimizer: AdamW ({param_count:,} params)")
+
     # Prepare with accelerate
-    model, optimizer_muon, optimizer_adamw, dataloader = accelerator.prepare(
-        model, optimizer_muon, optimizer_adamw, dataloader
+    model, optimizer, dataloader = accelerator.prepare(
+        model, optimizer, dataloader
     )
 
     # Resume from checkpoint
@@ -422,18 +413,14 @@ def train(args):
             if train_config.max_grad_norm > 0:
                 accelerator.clip_grad_norm_(model.parameters(), train_config.max_grad_norm)
 
-            # Update LR (scale both optimizers proportionally)
+            # Update LR
             lr_scale = get_lr(global_step, train_config) / max(train_config.lr, 1e-10)
-            for param_group in optimizer_adamw.param_groups:
+            for param_group in optimizer.param_groups:
                 param_group['lr'] = train_config.lr * lr_scale
-            for param_group in optimizer_muon.param_groups:
-                param_group['lr'] = train_config.muon_lr * lr_scale
             lr = train_config.lr * lr_scale  # for logging
 
-            optimizer_muon.step()
-            optimizer_adamw.step()
-            optimizer_muon.zero_grad()
-            optimizer_adamw.zero_grad()
+            optimizer.step()
+            optimizer.zero_grad()
 
         running_loss += loss.item()
 
