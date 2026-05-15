@@ -318,18 +318,27 @@ def train(args):
         drop_last=drop_last,
     )
 
-    # Optimizer: AdamW for all params
+    # Optimizer: AdamW for all params, but no weight decay for 1D params (bias, norm)
+    decay_params = [p for p in model.parameters() if p.requires_grad and p.ndim >= 2]
+    no_decay_params = [p for p in model.parameters() if p.requires_grad and p.ndim < 2]
+    
     optimizer = torch.optim.AdamW(
-        model.parameters(),
+        [
+            {"params": decay_params, "weight_decay": train_config.weight_decay},
+            {"params": no_decay_params, "weight_decay": 0.0},
+        ],
         lr=train_config.lr,
         betas=(train_config.adam_beta1, train_config.adam_beta2),
         eps=train_config.adam_eps,
-        weight_decay=train_config.weight_decay,
     )
 
     if accelerator.is_main_process:
-        param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"Optimizer: AdamW ({param_count:,} params)")
+        decay_count = sum(p.numel() for p in decay_params)
+        no_decay_count = sum(p.numel() for p in no_decay_params)
+        print(
+            f"Optimizer: AdamW "
+            f"({decay_count:,} decay params, {no_decay_count:,} no-decay params)"
+        )
 
     # Prepare with accelerate
     model, optimizer, dataloader = accelerator.prepare(
